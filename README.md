@@ -6,7 +6,7 @@ CardioRisk AI is an end-to-end Machine Learning system that predicts the risk of
 ---
 
 ## 🌐 Live Demo
-https://heart-disease-prediction-ml-lyey9gf2henc3ptaszc5vn.streamlit.app/
+https://ml-heart-risk-prediction.streamlit.app/
 
 ---
 
