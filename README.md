@@ -1,4 +1,4 @@
-# ❤️ CardioRisk AI – Heart Disease Prediction System
+# ❤️ CardioRisk AI – Explainable Heart Disease Prediction System
 
 ## 🚀 Overview
 CardioRisk AI is an end-to-end Machine Learning system that predicts the risk of heart disease using clinical patient data. The project covers the complete ML lifecycle including data preprocessing, model training, hyperparameter tuning, evaluation, and deployment via an interactive Streamlit web application.
