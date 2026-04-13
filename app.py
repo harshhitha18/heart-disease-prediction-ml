@@ -28,7 +28,7 @@ if "prediction" not in st.session_state:
  
 # ---------------- HEADER ----------------
 st.title("❤️ CardioRisk AI")
-st.markdown("### ML-Based Heart Disease Prediction System")
+st.markdown("### Explainable Heart Disease Prediction System")
 st.write("Enter patient details or upload a CSV file to assess heart disease risk.")
  
 st.divider()
