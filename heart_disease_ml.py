@@ -14,6 +14,7 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.tree import DecisionTreeClassifier
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.neural_network import MLPClassifier
+from imblearn.over_sampling import SMOTE
 
 # Evaluation
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
@@ -31,19 +32,17 @@ print("Dataset Shape:", df.shape)
 print(df.head())
 
 # =========================
-# 2. DATA UNDERSTANDING & CLEANING
+# 2. DATA CLEANING
 # =========================
 print("\nMissing Values:\n", df.isnull().sum())
-
-# Fill missing values (if any)
 df.fillna(df.median(), inplace=True)
 
 # =========================
-# 3. EXPLORATORY DATA ANALYSIS (EDA)
+# 3. EDA (BASIC)
 # =========================
 plt.figure(figsize=(6,4))
 sns.countplot(x="target", data=df)
-plt.title("Target Variable Distribution")
+plt.title("Target Distribution")
 plt.show()
 
 plt.figure(figsize=(10,8))
@@ -52,7 +51,25 @@ plt.title("Correlation Heatmap")
 plt.show()
 
 # =========================
-# 4. FEATURE & TARGET SPLIT
+# 🔥 FEATURE ENGINEERING
+# =========================
+
+# 1. Age groups (categorical pattern)
+df["age_group"] = pd.cut(df["age"],
+                        bins=[20, 40, 60, 100],
+                        labels=[0, 1, 2]).astype(int)
+
+# 2. Cholesterol to BP ratio (health indicator)
+df["chol_bp_ratio"] = df["chol"] / df["trestbps"]
+
+# 3. Combined risk score (domain-based)
+df["risk_score"] = df["cp"] + df["exang"] + df["oldpeak"]
+
+print("\nNew Features Added:")
+print(df[["age_group", "chol_bp_ratio", "risk_score"]].head())
+
+# =========================
+# 4. FEATURE / TARGET SPLIT
 # =========================
 X = df.drop("target", axis=1)
 y = df["target"]
@@ -65,14 +82,24 @@ X_train, X_test, y_train, y_test = train_test_split(
 )
 
 # =========================
-# 6. FEATURE SCALING
+# 6. HANDLE IMBALANCE (SMOTE)
+# =========================
+smote = SMOTE(random_state=42)
+X_train_resampled, y_train_resampled = smote.fit_resample(X_train, y_train)
+
+print("\nBefore SMOTE:\n", y_train.value_counts())
+print("After SMOTE:\n", pd.Series(y_train_resampled).value_counts())
+
+# =========================
+# 7. FEATURE SCALING
 # =========================
 scaler = StandardScaler()
-X_train_scaled = scaler.fit_transform(X_train)
+
+X_train_res_scaled = scaler.fit_transform(X_train_resampled)
 X_test_scaled = scaler.transform(X_test)
 
 # =========================
-# 7. MODEL INITIALIZATION
+# 8. MODEL INITIALIZATION
 # =========================
 models = {
     "Logistic Regression": LogisticRegression(max_iter=1000),
@@ -85,20 +112,23 @@ models = {
 }
 
 # =========================
-# 8. MODEL TRAINING & EVALUATION
+# 9. MODEL TRAINING & EVALUATION
 # =========================
 results = []
 
 for name, model in models.items():
 
+    # Models that need scaling
     if name in ["Logistic Regression", "Neural Network"]:
-        model.fit(X_train_scaled, y_train)
+        model.fit(X_train_res_scaled, y_train_resampled)
         y_pred = model.predict(X_test_scaled)
-        y_prob = model.predict_proba(X_test_scaled)[:,1]
+        y_prob = model.predict_proba(X_test_scaled)[:, 1]
+
+    # Tree models
     else:
-        model.fit(X_train, y_train)
+        model.fit(X_train_resampled, y_train_resampled)
         y_pred = model.predict(X_test)
-        y_prob = model.predict_proba(X_test)[:,1]
+        y_prob = model.predict_proba(X_test)[:, 1]
 
     acc = accuracy_score(y_test, y_pred)
     prec = precision_score(y_test, y_pred)
@@ -113,7 +143,7 @@ for name, model in models.items():
     print(classification_report(y_test, y_pred))
 
 # =========================
-# 9. MODEL COMPARISON
+# 10. MODEL COMPARISON
 # =========================
 results_df = pd.DataFrame(
     results,
@@ -124,12 +154,13 @@ print("\nMODEL PERFORMANCE COMPARISON:")
 print(results_df)
 
 # =========================
-# 10. HYPERPARAMETER TUNING (RANDOM FOREST)
+# 11. HYPERPARAMETER TUNING
 # =========================
 param_grid = {
     "n_estimators": [100, 200],
-    "max_depth": [None, 5, 10],
-    "min_samples_split": [2, 5]
+    "max_depth": [3, 5, 7],              
+    "min_samples_split": [5, 10],        
+    "min_samples_leaf": [2, 4]           
 }
 
 rf = RandomForestClassifier(random_state=42)
@@ -138,35 +169,91 @@ grid = GridSearchCV(
     rf,
     param_grid,
     cv=5,
-    scoring="roc_auc"
+    scoring="roc_auc",
+    n_jobs=-1
 )
 
-grid.fit(X_train, y_train)
+# Train on balanced data
+grid.fit(X_train_resampled, y_train_resampled)
 
 best_rf = grid.best_estimator_
 
+print("\nBest Parameters:", grid.best_params_)
+
 # =========================
-# 11. FEATURE IMPORTANCE
+# 🔥 STEP 2: CROSS VALIDATION (FIXED VERSION)
 # =========================
-importances = best_rf.feature_importances_
 
-feature_importance_df = pd.DataFrame({
-    "Feature": X.columns,
-    "Importance": importances
-}).sort_values(by="Importance", ascending=False)
+from imblearn.pipeline import Pipeline as ImbPipeline
+from sklearn.model_selection import cross_val_score, StratifiedKFold
 
-print("\nFEATURE IMPORTANCE:")
-print(feature_importance_df)
+# Create pipeline (SMOTE + model)
+pipeline = ImbPipeline([
+    ('smote', SMOTE(random_state=42)),
+    ('rf', RandomForestClassifier(**grid.best_params_, random_state=42))
+])
 
-plt.figure(figsize=(10,6))
-sns.barplot(x="Importance", y="Feature", data=feature_importance_df)
-plt.title("Feature Importance - Random Forest")
+# Stratified K-Fold (FIX 1)
+cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+
+# Cross validation
+cv_scores = cross_val_score(
+    pipeline,
+    X,
+    y,
+    cv=cv,
+    scoring='roc_auc',
+    n_jobs=-1
+)
+
+print("\nCross Validation Results:")
+print("Scores:", cv_scores)
+print("Mean ROC-AUC:", cv_scores.mean())
+print("Std Dev:", cv_scores.std())
+
+# Model stability check (FIX 2)
+print("\nModel Stability Check:")
+
+if cv_scores.std() < 0.05:
+    print("Model is stable ✅")
+else:
+    print("Model is unstable ⚠️")
+
+# =========================
+# 12. FINAL MODEL EVALUATION
+# =========================
+y_pred = best_rf.predict(X_test)
+y_prob = best_rf.predict_proba(X_test)[:, 1]
+
+print("\nFinal Random Forest Performance:")
+print(confusion_matrix(y_test, y_pred))
+print(classification_report(y_test, y_pred))
+print("ROC-AUC:", roc_auc_score(y_test, y_prob))
+
+import shap
+import matplotlib.pyplot as plt
+
+print("\nRunning SHAP Explainability...")
+
+# Create explainer
+explainer = shap.TreeExplainer(best_rf)
+
+# Get SHAP values
+shap_values = explainer.shap_values(X_test)
+
+# 🔥 Create figure manually
+plt.figure()
+
+shap.summary_plot(shap_values, X_test, show=False)
+
+# 🔥 SAVE IMAGE (IMPORTANT)
+plt.savefig("shap_summary.png", bbox_inches='tight')
+
+print("SHAP plot saved as shap_summary.png")
+
+# Optional display
 plt.show()
 
-import joblib
 
-joblib.dump(best_rf, "best_rf_model.pkl")
-joblib.dump(scaler, "scaler.pkl")
 
-print("Model and scaler saved successfully.")
 
